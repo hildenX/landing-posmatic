@@ -630,7 +630,7 @@
   }
 
   // ── MercadoPago ────────────────────────────────────────────
-  const BACKEND_URL = "http://localhost:3000";
+  const BACKEND_URL = "";
 
   async function pagarPlan(plan, btn) {
     const texto  = btn.querySelector('.btn-text');
@@ -649,8 +649,7 @@
       if (!res.ok) throw new Error("Error del servidor");
 
       const data = await res.json();
-      // Cambiar a data.init_point cuando vayas a producción
-      window.location.href = data.sandbox_init_point;
+      window.location.href = data.init_point;
     } catch (err) {
       alert("Hubo un error al procesar el pago. Intenta de nuevo.");
       console.error(err);
