@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paga tu cuenta - POS-Matic Pudú</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- hCaptcha -->
+  <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: "#a413ec",
+            "primary-dark": "#7100a6",
+            "primary-light": "#f5d9ff",
+          },
+          fontFamily: { sans: ["Manrope", "sans-serif"] },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    body {
+      font-family: "Manrope", sans-serif;
+      background-color: #ffffff;
+      background-image: radial-gradient(#a413ec 0.5px, transparent 0.5px);
+      background-size: 24px 24px;
+      background-attachment: fixed;
+    }
+    .card { background: white; border-radius: 1.5rem; box-shadow: 0 8px 40px rgba(164,19,236,0.10); }
+    .btn-primary {
+      background: linear-gradient(135deg, #a413ec, #7100a6);
+      color: white; font-weight: 700; padding: 14px 32px;
+      border-radius: 999px; border: none; cursor: pointer;
+      font-size: 1rem; transition: opacity .2s, transform .1s;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-primary:hover { opacity: .9; transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-outline {
+      background: transparent; color: #a413ec; font-weight: 600;
+      padding: 12px 28px; border-radius: 999px;
+      border: 2px solid #a413ec; cursor: pointer;
+      font-size: .95rem; transition: background .2s;
+    }
+    .btn-outline:hover { background: #f5d9ff; }
+    .badge-pendiente { background:#FEF3C7; color:#92400E; padding:4px 14px; border-radius:999px; font-size:.8rem; font-weight:700; }
+    .badge-gracia    { background:#FEE2E2; color:#991B1B; padding:4px 14px; border-radius:999px; font-size:.8rem; font-weight:700; }
+    .badge-activa    { background:#D1FAE5; color:#065F46; padding:4px 14px; border-radius:999px; font-size:.8rem; font-weight:700; }
+    .badge-bloqueada { background:#FEE2E2; color:#991B1B; padding:4px 14px; border-radius:999px; font-size:.8rem; font-weight:700; }
+    .spinner { width:22px; height:22px; border:3px solid rgba(255,255,255,.4); border-top-color:white; border-radius:50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(164,19,236,.2); }
+    /* hCaptcha: evita que el iframe desborde el contenedor */
+    .h-captcha { max-width: 100%; overflow: hidden; border-radius: 12px; }
+    .h-captcha iframe { max-width: 100% !important; border-radius: 12px; }
+    .pago-card { border: 1.5px solid #e5e7eb; border-radius: 1rem; padding: 1.25rem 1.5rem; transition: border-color .2s; }
+    .pago-card:hover { border-color: #c084fc; }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col items-center justify-start py-12 px-4">
+
+  <!-- Logo / Header -->
+  <div class="mb-8 text-center">
+    <div class="inline-flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg font-black"
+           style="background: linear-gradient(135deg,#a413ec,#7100a6);">P</div>
+      <span class="text-2xl font-extrabold text-gray-900">POS-Matic</span>
+    </div>
+    <p class="text-gray-500 text-sm">por Pudú Tecnología</p>
+  </div>
+
+  <!-- ══════════════════════════ SECCIÓN: RESULTADO DE PAGO ══════════════════ -->
+  <div id="sec-resultado" class="card w-full max-w-md p-8 text-center hidden">
+    <div id="res-icon" class="text-6xl mb-4"></div>
+    <h2 id="res-titulo" class="text-2xl font-extrabold text-gray-900 mb-2"></h2>
+    <p id="res-desc" class="text-gray-500 mb-8"></p>
+    <a href="pagar.html" class="btn-primary">Volver</a>
+  </div>
+
+  <!-- ══════════════════════════ SECCIÓN: FORMULARIO LOOKUP ══════════════════ -->
+  <div id="sec-lookup" class="card w-full max-w-md p-8">
+    <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Paga tu cuenta</h1>
+    <p class="text-gray-500 text-sm mb-7">Ingresa tu email para ver tus pagos pendientes.</p>
+
+    <form id="form-lookup" novalidate>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Email de tu cuenta</label>
+      <input
+        id="inp-email" type="email" autocomplete="email"
+        placeholder="correo@ejemplo.com" required
+        class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm mb-5 transition-shadow"
+      />
+
+      <!-- hCaptcha widget -->
+      <div id="hcaptcha-widget"
+           class="h-captcha mb-5"
+           data-sitekey="10000000-ffff-ffff-ffff-000000000001"
+           data-theme="light"
+           data-size="normal">
+      </div>
+
+      <div id="lookup-error" class="text-red-600 text-sm mb-4 hidden"></div>
+
+      <button type="submit" id="btn-buscar" class="btn-primary w-full justify-center">
+        <span id="buscar-text">Buscar cuenta</span>
+        <span id="buscar-spinner" class="spinner hidden"></span>
+      </button>
+    </form>
+  </div>
+
+  <!-- ══════════════════════════ SECCIÓN: ESTADO CUENTA ═════════════════════ -->
+  <div id="sec-cuenta" class="card w-full max-w-md p-8 hidden">
+    <!-- Perfil -->
+    <div class="flex items-center gap-4 mb-6 pb-6 border-b border-gray-100">
+      <div class="w-12 h-12 rounded-full flex items-center justify-center font-bold text-white text-xl"
+           style="background: linear-gradient(135deg,#a413ec,#7100a6);" id="avatar-inicial">?</div>
+      <div>
+        <div class="font-bold text-gray-900" id="cuenta-nombre">—</div>
+        <div class="text-gray-400 text-sm" id="cuenta-email">—</div>
+      </div>
+      <div class="ml-auto">
+        <span id="cuenta-badge-estado" class="badge-pendiente">—</span>
+      </div>
+    </div>
+
+    <!-- Plan -->
+    <div class="bg-gray-50 rounded-xl p-4 mb-6">
+      <div class="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1">Plan activo</div>
+      <div class="font-bold text-gray-900" id="cuenta-plan">—</div>
+      <div class="text-sm text-gray-500" id="cuenta-proximo-cobro"></div>
+    </div>
+
+    <!-- Pagos pendientes -->
+    <div id="sec-pagos-pendientes" class="hidden">
+      <h3 class="font-bold text-gray-800 mb-3">Pagos pendientes</h3>
+      <div id="lista-pagos" class="flex flex-col gap-3 mb-6"></div>
+    </div>
+
+    <!-- Sin deuda -->
+    <div id="sec-sin-deuda" class="hidden text-center py-4">
+      <div class="text-4xl mb-2">✅</div>
+      <p class="text-green-700 font-semibold">Tu cuenta está al día</p>
+      <p class="text-gray-400 text-sm">No tienes pagos pendientes.</p>
+    </div>
+
+    <div id="cuenta-error" class="text-red-600 text-sm mt-4 hidden"></div>
+
+    <button onclick="resetLookup()" class="btn-outline mt-6 w-full justify-center">
+      ← Buscar otra cuenta
+    </button>
+  </div>
+
+  <!-- ══════════════════════════ SECCIÓN: SIN SUSCRIPCIÓN ═══════════════════ -->
+  <div id="sec-no-sub" class="card w-full max-w-md p-8 text-center hidden">
+    <div class="text-5xl mb-4">🔍</div>
+    <h2 class="text-xl font-bold text-gray-900 mb-2">No se encontró suscripción</h2>
+    <p class="text-gray-500 text-sm mb-6">
+      El email <strong id="no-sub-email"></strong> no tiene una suscripción activa.<br>
+      ¿Quieres contratar un plan?
+    </p>
+    <a href="index.html#planes" class="btn-primary inline-flex justify-center mb-3">Ver planes</a>
+    <br>
+    <button onclick="resetLookup()" class="btn-outline mt-3">← Volver</button>
+  </div>
+
+  <p class="text-gray-400 text-xs mt-8">
+    ¿Necesitas ayuda? Escríbenos a
+    <a href="https://wa.me/56959695940" class="text-primary underline">WhatsApp</a>
+  </p>
+
+  <script>
+    // ─── Configuración ────────────────────────────────────────────────────────
+    const API = "http://localhost:3000"; // En producción: URL del backend
+
+    // ─── Manejo de resultado de pago (back_url de MP) ─────────────────────────
+    const params = new URLSearchParams(location.search);
+    const resultadoPago = params.get("pago");
+
+    if (resultadoPago) {
+      document.getElementById("sec-lookup").classList.add("hidden");
+      const sec = document.getElementById("sec-resultado");
+      sec.classList.remove("hidden");
+
+      const configs = {
+        exitoso: {
+          icon: "✅",
+          titulo: "¡Pago recibido!",
+          desc: "Tu suscripción será activada en unos instantes. Recibirás un email de confirmación.",
+        },
+        fallido: {
+          icon: "❌",
+          titulo: "Pago rechazado",
+          desc: "No se pudo procesar tu pago. Puedes intentarlo de nuevo.",
+        },
+        pendiente: {
+          icon: "⏳",
+          titulo: "Pago en proceso",
+          desc: "Tu pago está siendo verificado. Te notificaremos cuando se confirme.",
+        },
+      };
+      const cfg = configs[resultadoPago] || configs.pendiente;
+      document.getElementById("res-icon").textContent = cfg.icon;
+      document.getElementById("res-titulo").textContent = cfg.titulo;
+      document.getElementById("res-desc").textContent = cfg.desc;
+    }
+
+    // ─── Formateo ─────────────────────────────────────────────────────────────
+    function formatCLP(n) {
+      return "$" + Math.round(n).toLocaleString("es-CL");
+    }
+    function formatFecha(s) {
+      if (!s) return "—";
+      return new Date(s).toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" });
+    }
+
+    // ─── Lookup de cuenta ─────────────────────────────────────────────────────
+    document.getElementById("form-lookup").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("inp-email").value.trim();
+      const errEl = document.getElementById("lookup-error");
+      errEl.classList.add("hidden");
+
+      if (!email) { mostrarErrorLookup("Ingresa tu email."); return; }
+
+      // Obtener token hCaptcha
+      let htoken = "";
+      if (window.hcaptcha) {
+        try { htoken = hcaptcha.getResponse(); } catch {}
+      }
+
+      setBuscando(true);
+
+      try {
+        const res = await fetch(`${API}/api/cuenta/estado`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, hcaptcha_token: htoken }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          if (res.status === 404) {
+            mostrarErrorLookup(data.error || "No se encontró esa cuenta.");
+          } else {
+            mostrarErrorLookup(data.error || "Error al consultar la cuenta.");
+          }
+          if (window.hcaptcha) hcaptcha.reset();
+          return;
+        }
+
+        document.getElementById("sec-lookup").classList.add("hidden");
+
+        if (!data.tiene_suscripcion) {
+          document.getElementById("no-sub-email").textContent = email;
+          document.getElementById("sec-no-sub").classList.remove("hidden");
+          return;
+        }
+
+        mostrarCuenta(data);
+
+      } catch (err) {
+        mostrarErrorLookup("No se pudo conectar con el servidor. ¿Está encendido?");
+        if (window.hcaptcha) hcaptcha.reset();
+      } finally {
+        setBuscando(false);
+      }
+    });
+
+    function mostrarCuenta(data) {
+      const { profile, suscripcion, pagos_pendientes } = data;
+
+      // Avatar inicial
+      const nombre = profile.nombre || profile.email;
+      document.getElementById("avatar-inicial").textContent = nombre.charAt(0).toUpperCase();
+      document.getElementById("cuenta-nombre").textContent = profile.nombre || "—";
+      document.getElementById("cuenta-email").textContent  = profile.email;
+
+      // Badge estado suscripción
+      const badgeEl = document.getElementById("cuenta-badge-estado");
+      const estadoBadge = {
+        activa:    ["badge-activa",    "Activa"],
+        en_gracia: ["badge-gracia",    "En gracia"],
+        bloqueada: ["badge-bloqueada", "Bloqueada"],
+        pendiente: ["badge-pendiente", "Pendiente"],
+      }[suscripcion.estado] || ["badge-pendiente", suscripcion.estado];
+      badgeEl.className = estadoBadge[0];
+      badgeEl.textContent = estadoBadge[1];
+
+      // Plan
+      document.getElementById("cuenta-plan").textContent =
+        suscripcion.plan?.nombre || "—";
+      document.getElementById("cuenta-proximo-cobro").textContent =
+        suscripcion.proximo_cobro
+          ? "Próximo cobro: " + formatFecha(suscripcion.proximo_cobro)
+          : "";
+
+      // Pagos
+      const lista = document.getElementById("lista-pagos");
+      lista.innerHTML = "";
+
+      if (pagos_pendientes && pagos_pendientes.length > 0) {
+        document.getElementById("sec-pagos-pendientes").classList.remove("hidden");
+        document.getElementById("sec-sin-deuda").classList.add("hidden");
+
+        pagos_pendientes.forEach((pago) => {
+          const div = document.createElement("div");
+          div.className = "pago-card";
+          const esLegacy = pago.es_legacy === true;
+          const montoHtml = esLegacy
+            ? `<div id="monto-legacy" class="font-bold text-gray-900 text-lg">Calculando...</div>
+               <div class="text-xs text-gray-400">Plan Básico · 0.7 UF</div>`
+            : `<div class="font-bold text-gray-900 text-lg">${formatCLP(pago.monto_clp)}</div>`;
+          const btnHtml = esLegacy
+            ? `<button id="btn-pago-legacy" class="btn-primary" style="padding:10px 22px; font-size:.9rem;"
+                 onclick="pagarLegacy(this)">
+                 <span class="btn-txt">Pagar ahora</span>
+                 <span class="spinner hidden"></span>
+               </button>`
+            : `<button class="btn-primary" style="padding:10px 22px; font-size:.9rem;"
+                 onclick="pagarAhora('${pago.id}', this)">Pagar ahora</button>`;
+          div.innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                ${montoHtml}
+                <div class="text-xs text-gray-400 mt-0.5">Período: ${pago.periodo_cobrado || "—"}</div>
+                <span class="${pago.estado === 'en_gracia' ? 'badge-gracia' : 'badge-pendiente'} mt-1 inline-block">
+                  ${pago.estado === 'en_gracia' ? 'En gracia' : 'Pendiente'}
+                </span>
+              </div>
+              <div>${btnHtml}</div>
+            </div>`;
+          lista.appendChild(div);
+
+          // Si es legacy, obtener el monto real con la UF del día
+          if (esLegacy) fetchMontoLegacy(profile.id);
+        });
+      } else {
+        document.getElementById("sec-pagos-pendientes").classList.add("hidden");
+        document.getElementById("sec-sin-deuda").classList.remove("hidden");
+      }
+
+      document.getElementById("sec-cuenta").classList.remove("hidden");
+    }
+
+    // ─── Obtener monto legacy (UF del día × 0.7) ─────────────────────────────
+    let _perfilIdLegacy = null;
+    async function fetchMontoLegacy(userId) {
+      _perfilIdLegacy = userId;
+      try {
+        const r = await fetch(`${API}/api/uf-preview?uf=0.7`);
+        const d = await r.json();
+        const el = document.getElementById("monto-legacy");
+        if (el && d.monto) el.textContent = formatCLP(d.monto) + " aprox.";
+      } catch {}
+    }
+
+    // ─── Pago legacy → llama al servidor que crea preferencia MP ─────────────
+    async function pagarLegacy(btn) {
+      const errEl = document.getElementById("cuenta-error");
+      errEl.classList.add("hidden");
+      btn.disabled = true;
+      btn.querySelector(".btn-txt").classList.add("hidden");
+      btn.querySelector(".spinner").classList.remove("hidden");
+
+      try {
+        const res = await fetch(`${API}/api/pago-legacy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: _perfilIdLegacy, plan_slug: "basico" }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error al crear el pago");
+        window.location.href = data.init_point;
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        btn.querySelector(".btn-txt").classList.remove("hidden");
+        btn.querySelector(".spinner").classList.add("hidden");
+      }
+    }
+
+    // ─── Redirigir a MercadoPago ──────────────────────────────────────────────
+    async function pagarAhora(pagoId, btn) {
+      const errEl = document.getElementById("cuenta-error");
+      errEl.classList.add("hidden");
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      try {
+        const res = await fetch(`${API}/api/crear-preferencia`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pago_id: pagoId }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || "Error al crear la preferencia de pago");
+        }
+
+        // Redirigir a MercadoPago
+        window.location.href = data.init_point;
+
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove("hidden");
+        btn.disabled = false;
+        btn.innerHTML = "Pagar ahora";
+      }
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+    function mostrarErrorLookup(msg) {
+      const el = document.getElementById("lookup-error");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+    }
+
+    function setBuscando(loading) {
+      document.getElementById("btn-buscar").disabled = loading;
+      document.getElementById("buscar-text").classList.toggle("hidden", loading);
+      document.getElementById("buscar-spinner").classList.toggle("hidden", !loading);
+    }
+
+    function resetLookup() {
+      document.getElementById("sec-cuenta").classList.add("hidden");
+      document.getElementById("sec-no-sub").classList.add("hidden");
+      document.getElementById("sec-lookup").classList.remove("hidden");
+      document.getElementById("lookup-error").classList.add("hidden");
+      document.getElementById("inp-email").value = "";
+      if (window.hcaptcha) hcaptcha.reset();
+    }
+  </script>
+</body>
+</html>

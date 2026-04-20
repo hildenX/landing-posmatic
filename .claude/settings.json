@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(curl -s http://localhost:3000/create-preference -X POST -H \"Content-Type: application/json\" -d '{\"\"plan\"\":\"\"negocio\"\"}')",
+      "Bash(node server.js)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(taskkill /F /PID 8284)",
+      "Bash(cmd /c \"taskkill /F /PID 8284\")",
+      "Bash(cmd /c \"taskkill /F /PID 8284 && echo OK\")",
+      "Bash(cmd /c \"netstat -ano | findstr :3000\")",
+      "Bash(curl -s http://localhost:3000/create-preference -X POST -H \"Content-Type: application/json\" -d \"{\"\"plan\"\":\"\"negocio\"\"}\")",
+      "Bash(cmd /c \"for /f \"\"tokens=5\"\" %a in \\(''netstat -ano ^| findstr :3000 ^| findstr LISTENING''\\) do taskkill /F /PID %a\")",
+      "Bash(cmd /c \"netstat -ano | findstr :3000 | findstr LISTENING\")",
+      "Bash(findstr LISTEN)",
+      "Bash(findstr 3000)"
+    ]
+  }
+}
