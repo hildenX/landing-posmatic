@@ -13,5 +13,9 @@ function getSupabase() {
 }
 
 module.exports = new Proxy({}, {
-  get: (_, prop) => getSupabase()[prop],
+  get: (_, prop) => {
+    const client = getSupabase();
+    const val = client[prop];
+    return typeof val === "function" ? val.bind(client) : val;
+  },
 });
