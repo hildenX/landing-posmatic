@@ -29,8 +29,8 @@ module.exports = async (req, res) => {
     const { data: perfil } = await supabase.from("profiles").select("email").eq("id", user_id).single();
     const montoTest = perfil?.email && TEST_ACCOUNTS_CLP[perfil.email];
     const monto = montoTest || Math.round(plan.uf * uf);
-    const landingUrl = process.env.LANDING_URL;
-    const backendUrl = process.env.BACKEND_URL;
+    const landingUrl = (process.env.LANDING_URL || "").trim();
+    const backendUrl = (process.env.BACKEND_URL || "").trim();
 
     const preference = await preferenceApi.create({
       body: {
@@ -49,7 +49,7 @@ module.exports = async (req, res) => {
 
     res.json({ init_point: preference.init_point, monto, uf, plan: plan.nombre });
   } catch (err) {
-    console.error("Error pago-legacy:", err.message, err.cause);
-    res.status(500).json({ error: "Error creando preferencia de pago", _debug: err.message, _cause: String(err.cause || "") });
+    console.error("Error pago-legacy:", err.message);
+    res.status(500).json({ error: "Error creando preferencia de pago" });
   }
 };
