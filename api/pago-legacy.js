@@ -49,7 +49,7 @@ module.exports = async (req, res) => {
 
     res.json({ init_point: preference.init_point, monto, uf, plan: plan.nombre });
   } catch (err) {
-    console.error("Error pago-legacy:", err.message);
-    res.status(500).json({ error: "Error creando preferencia de pago" });
+    console.error("Error pago-legacy:", err.message, err.cause);
+    res.status(500).json({ error: "Error creando preferencia de pago", _debug: err.message, _cause: String(err.cause || "") });
   }
 };
