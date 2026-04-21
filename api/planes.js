@@ -1,7 +1,6 @@
-const { createClient } = require("@supabase/supabase-js");
-const { handleCors } = require("./_lib/cors");
-
 module.exports = async (req, res) => {
+  const { createClient } = require("@supabase/supabase-js");
+  const { handleCors } = require("./_lib/cors");
   if (handleCors(req, res)) return;
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -11,15 +10,8 @@ module.exports = async (req, res) => {
     ]);
     if (ufErr) throw ufErr;
     if (plErr) throw plErr;
-
-    const resultado = planes.map((p) => ({
-      ...p,
-      precio_clp: Math.round(p.uf_cantidad * uf),
-      uf_valor: uf,
-    }));
-    res.json({ planes: resultado, uf });
+    res.json({ planes: planes.map(p => ({ ...p, precio_clp: Math.round(p.uf_cantidad * uf), uf_valor: uf })), uf });
   } catch (err) {
-    console.error("Error obteniendo planes:", err.message);
     res.status(500).json({ error: "No se pudo obtener los planes" });
   }
 };
