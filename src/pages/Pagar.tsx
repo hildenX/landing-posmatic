@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
+import { supabase as sb } from "../integrations/supabase/client";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const sb = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 type Profile = { id: string; email: string; nombre: string; subscription_status: string; subscription_end_date: string | null; auth_status: string | null };
 type Suscripcion = { id: string | null; estado: string; plan: { nombre: string } | null; proximo_cobro: string | null };
@@ -40,7 +39,7 @@ export default function Pagar() {
 
   // Monto UF cuando llega un pago legacy
   useEffect(() => {
-    if (view !== "cuenta" || !cuenta || !sb) return;
+    if (view !== "cuenta" || !cuenta) return;
     const legacy = cuenta.pagos_pendientes.find(p => p.es_legacy);
     if (!legacy) return;
     perfilId.current = cuenta.profile.id;
@@ -53,11 +52,6 @@ export default function Pagar() {
     e.preventDefault();
     setError("");
     if (!email) { setError("Ingresa tu email."); return; }
-
-    if (!sb) {
-      setError("Conecta tu proyecto Supabase en Lovable (botón nube ☁️ arriba a la derecha).");
-      return;
-    }
 
     setLoading(true);
     try {
