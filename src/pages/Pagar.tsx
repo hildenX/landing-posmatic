@@ -63,57 +63,19 @@ export default function Pagar() {
     try {
       const emailLower = email.trim().toLowerCase();
 
-      const { data: profiles, error: profErr } = await sb
-        .from("profiles")
-        .select("id, email, nombre_completo, nombre_negocio, subscription_status, subscription_end_date, auth_status, suscripcion_activa")
-        .eq("email", emailLower)
-        .limit(1);
+      const { data, error: rpcErr } = await sb.rpc("buscar_cuenta_por_email", { email_input: emailLower });
 
-      if (profErr) throw new Error(profErr.message);
-      if (!profiles || profiles.length === 0) {
+      if (rpcErr) throw new Error(rpcErr.message);
+      if (!data || !data.found) {
         setNoSubEmail(email);
         setView("nosub");
         return;
       }
 
-      const p = profiles[0];
-      const profile: Profile = {
-        id: p.id, email: p.email,
-        nombre: p.nombre_completo || p.nombre_negocio || p.email,
-        subscription_status: p.subscription_status,
-        subscription_end_date: p.subscription_end_date,
-        auth_status: p.auth_status,
-      };
-
-      // Buscar suscripción nueva
-      const { data: subs } = await sb
-        .from("suscripciones")
-        .select("id, estado, proximo_cobro, plan:planes(id, nombre, uf_cantidad)")
-        .eq("user_id", profile.id)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (subs && subs.length > 0) {
-        const sub = subs[0];
-        const { data: pagos } = await sb.from("pagos")
-          .select("id, monto_clp, estado, periodo_cobrado")
-          .eq("suscripcion_id", sub.id)
-          .in("estado", ["pendiente", "en_gracia"])
-          .order("created_at", { ascending: false });
-        setCuenta({ profile, suscripcion: { id: sub.id, estado: sub.estado, plan: sub.plan as any, proximo_cobro: sub.proximo_cobro }, pagos_pendientes: pagos || [] });
-        setView("cuenta");
-        return;
-      }
-
-      // Sistema legacy
-      const suspendida = profile.subscription_status === "suspended" ||
-        profile.auth_status === "suspended" ||
-        (profile.subscription_end_date && new Date(profile.subscription_end_date) < new Date());
-
       setCuenta({
-        profile,
-        suscripcion: { id: null, estado: suspendida ? "bloqueada" : "activa", plan: { nombre: "POS-Matic" }, proximo_cobro: profile.subscription_end_date },
-        pagos_pendientes: suspendida ? [{ id: "legacy-" + profile.id, monto_clp: null, estado: "pendiente", periodo_cobrado: new Date().toISOString().slice(0, 7), es_legacy: true }] : [],
+        profile: data.profile as Profile,
+        suscripcion: data.suscripcion as Suscripcion,
+        pagos_pendientes: (data.pagos_pendientes || []) as Pago[],
       });
       setView("cuenta");
 
