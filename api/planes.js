@@ -1,9 +1,10 @@
-const supabase = require("./_lib/supabase");
+const { createClient } = require("@supabase/supabase-js");
 const { handleCors } = require("./_lib/cors");
 
 module.exports = async (req, res) => {
   if (handleCors(req, res)) return;
   try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: uf, error: ufErr }, { data: planes, error: plErr }] = await Promise.all([
       supabase.rpc("get_uf_actual"),
       supabase.from("planes").select("*").eq("activo", true).order("precio_uf"),
