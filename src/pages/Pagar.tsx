@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
-const API = "";
+const API = import.meta.env.VITE_API_URL || "https://posmatic-landing.vercel.app";
 
 type Profile = { id: string; email: string; nombre: string; negocio: string; activa: boolean };
 type Suscripcion = { id: string | null; estado: string; plan: { nombre: string } | null; proximo_cobro: string | null };

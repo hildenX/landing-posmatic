@@ -43,7 +43,8 @@ export default function Home() {
     texto.classList.add("hidden");
     loader.classList.remove("hidden");
     try {
-      const res = await fetch("/create-preference", {
+      const API = import.meta.env.VITE_API_URL || "https://posmatic-landing.vercel.app";
+      const res = await fetch(`${API}/api/create-preference`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }),
