@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase as sb } from "../integrations/supabase/client";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://miuirpcrkfnfngvplhqp.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_i4Gr8f8Pc-0XyCsRt60kFA_3b8K2v5r";
 
 type Profile = { id: string; email: string; nombre: string; subscription_status: string; subscription_end_date: string | null; auth_status: string | null };
 type Suscripcion = { id: string | null; estado: string; plan: { nombre: string } | null; proximo_cobro: string | null };
