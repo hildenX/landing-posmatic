@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { supabase } from "../integrations/supabase/client";
 
-// URL base de las Edge Functions de Supabase
-const SUPABASE_FUNCTIONS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+const HAS_SUPABASE = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const VERCEL_API = "https://posmatic-landing.vercel.app";
 
 type Profile = { id: string; email: string; nombre: string; activa: boolean; subscription_status: string; subscription_end_date: string | null; auth_status: string | null };
 type Suscripcion = { id: string | null; estado: string; plan: { nombre: string } | null; proximo_cobro: string | null };
@@ -20,73 +20,64 @@ function formatFecha(s: string | null) {
 }
 
 async function consultarCuenta(email: string): Promise<CuentaData> {
-  const emailLower = email.trim().toLowerCase();
+  // Si Supabase está configurado (Lovable con proyecto conectado) → consulta directa
+  if (HAS_SUPABASE) {
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const emailLower = email.trim().toLowerCase();
 
-  // 1. Buscar perfil por email
-  const { data: profiles, error: profErr } = await supabase
-    .from("profiles")
-    .select("id, email, nombre_completo, nombre_negocio, subscription_status, subscription_end_date, auth_status, suscripcion_activa")
-    .eq("email", emailLower)
-    .limit(1);
+    const { data: profiles, error: profErr } = await sb
+      .from("profiles")
+      .select("id, email, nombre_completo, nombre_negocio, subscription_status, subscription_end_date, auth_status, suscripcion_activa")
+      .eq("email", emailLower)
+      .limit(1);
 
-  if (profErr) throw new Error(profErr.message);
-  if (!profiles || profiles.length === 0) throw Object.assign(new Error("No se encontró ninguna cuenta con ese email"), { status: 404 });
+    if (profErr) throw new Error(profErr.message);
+    if (!profiles || profiles.length === 0) throw Object.assign(new Error("No se encontró ninguna cuenta con ese email"), { status: 404 });
 
-  const p = profiles[0];
-  const profile: Profile = {
-    id: p.id,
-    email: p.email,
-    nombre: p.nombre_completo || p.nombre_negocio || p.email,
-    activa: p.suscripcion_activa ?? (p.subscription_status === "active"),
-    subscription_status: p.subscription_status,
-    subscription_end_date: p.subscription_end_date,
-    auth_status: p.auth_status,
-  };
+    const p = profiles[0];
+    const profile: Profile = {
+      id: p.id, email: p.email,
+      nombre: p.nombre_completo || p.nombre_negocio || p.email,
+      activa: p.suscripcion_activa ?? (p.subscription_status === "active"),
+      subscription_status: p.subscription_status,
+      subscription_end_date: p.subscription_end_date,
+      auth_status: p.auth_status,
+    };
 
-  // 2. Buscar suscripción activa en tabla nueva
-  const { data: subs } = await supabase
-    .from("suscripciones")
-    .select("id, estado, proximo_cobro, plan:planes(id, nombre, uf_cantidad)")
-    .eq("user_id", profile.id)
-    .order("created_at", { ascending: false })
-    .limit(1);
+    const { data: subs } = await sb
+      .from("suscripciones")
+      .select("id, estado, proximo_cobro, plan:planes(id, nombre, uf_cantidad)")
+      .eq("user_id", profile.id).order("created_at", { ascending: false }).limit(1);
 
-  if (subs && subs.length > 0) {
-    const sub = subs[0];
-    const { data: pagos } = await supabase
-      .from("pagos")
-      .select("id, monto_clp, estado, periodo_cobrado")
-      .eq("suscripcion_id", sub.id)
-      .in("estado", ["pendiente", "en_gracia"])
-      .order("created_at", { ascending: false });
+    if (subs && subs.length > 0) {
+      const sub = subs[0];
+      const { data: pagos } = await sb.from("pagos")
+        .select("id, monto_clp, estado, periodo_cobrado")
+        .eq("suscripcion_id", sub.id).in("estado", ["pendiente", "en_gracia"])
+        .order("created_at", { ascending: false });
+      return { tiene_suscripcion: true, profile, suscripcion: { id: sub.id, estado: sub.estado, plan: sub.plan as any, proximo_cobro: sub.proximo_cobro }, pagos_pendientes: pagos || [] };
+    }
 
+    const suspendida = profile.subscription_status === "suspended" || profile.auth_status === "suspended" ||
+      (profile.subscription_end_date && new Date(profile.subscription_end_date) < new Date());
     return {
-      tiene_suscripcion: true,
-      profile,
-      suscripcion: { id: sub.id, estado: sub.estado, plan: sub.plan as any, proximo_cobro: sub.proximo_cobro },
-      pagos_pendientes: pagos || [],
+      tiene_suscripcion: true, profile,
+      suscripcion: { id: null, estado: suspendida ? "bloqueada" : "activa", plan: { nombre: "POS-Matic" }, proximo_cobro: profile.subscription_end_date },
+      pagos_pendientes: suspendida ? [{ id: "legacy-" + profile.id, monto_clp: null, estado: "pendiente", periodo_cobrado: new Date().toISOString().slice(0, 7), es_legacy: true }] : [],
     };
   }
 
-  // 3. Sistema legacy
-  const suspendida =
-    profile.subscription_status === "suspended" ||
-    profile.auth_status === "suspended" ||
-    (profile.subscription_end_date && new Date(profile.subscription_end_date) < new Date());
-
-  return {
-    tiene_suscripcion: true,
-    profile,
-    suscripcion: {
-      id: null,
-      estado: suspendida ? "bloqueada" : "activa",
-      plan: { nombre: "POS-Matic" },
-      proximo_cobro: profile.subscription_end_date,
-    },
-    pagos_pendientes: suspendida
-      ? [{ id: "legacy-" + profile.id, monto_clp: null, estado: "pendiente", periodo_cobrado: new Date().toISOString().slice(0, 7), es_legacy: true }]
-      : [],
-  };
+  // Fallback → API de Vercel (funciona en producción/Vercel)
+  const res = await fetch(`${VERCEL_API}/api/cuenta/estado`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: email.trim() }),
+  });
+  const data = await res.json();
+  if (res.status === 404) throw Object.assign(new Error(data.error || "No se encontró ninguna cuenta"), { status: 404 });
+  if (!res.ok) throw new Error(data.error || "Error al consultar la cuenta");
+  return data;
 }
 
 export default function Pagar() {
@@ -122,9 +113,10 @@ export default function Pagar() {
     const legacy = cuenta.pagos_pendientes.find((p) => p.es_legacy);
     if (!legacy) return;
     perfilIdRef.current = cuenta.profile.id;
-    supabase.rpc("get_uf_actual").then(({ data }) => {
-      if (data) setMontoLegacy(formatCLP(Math.round(0.7 * data)) + " aprox.");
-    });
+    fetch(`${VERCEL_API}/api/uf-preview?uf=0.7`)
+      .then((r) => r.json())
+      .then((d) => { if (d.monto) setMontoLegacy(formatCLP(d.monto) + " aprox."); })
+      .catch(() => {});
   }, [view, cuenta]);
 
   async function handleLookup(e: React.FormEvent) {
@@ -154,15 +146,12 @@ export default function Pagar() {
     setCuentaError("");
     setPagandoLegacy(true);
     try {
-      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/pago-legacy`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ user_id: perfilIdRef.current, plan_slug: "basico" }),
-      });
+      const url = HAS_SUPABASE
+        ? `${SUPABASE_URL}/functions/v1/pago-legacy`
+        : `${VERCEL_API}/api/pago-legacy`;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (HAS_SUPABASE) { headers["apikey"] = SUPABASE_ANON_KEY; headers["Authorization"] = `Bearer ${SUPABASE_ANON_KEY}`; }
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ user_id: perfilIdRef.current, plan_slug: "basico" }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al crear el pago");
       window.location.href = data.init_point;
@@ -175,15 +164,12 @@ export default function Pagar() {
   async function pagarAhora(pagoId: string) {
     setCuentaError("");
     try {
-      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/crear-preferencia`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ pago_id: pagoId }),
-      });
+      const url = HAS_SUPABASE
+        ? `${SUPABASE_URL}/functions/v1/crear-preferencia`
+        : `${VERCEL_API}/api/crear-preferencia`;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (HAS_SUPABASE) { headers["apikey"] = SUPABASE_ANON_KEY; headers["Authorization"] = `Bearer ${SUPABASE_ANON_KEY}`; }
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify({ pago_id: pagoId }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al crear la preferencia de pago");
       window.location.href = data.init_point;
