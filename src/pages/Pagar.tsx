@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
+import { supabase } from "../integrations/supabase/client";
 
-const API = import.meta.env.VITE_API_URL || "https://posmatic-landing.vercel.app";
+// URL base de las Edge Functions de Supabase
+const SUPABASE_FUNCTIONS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-type Profile = { id: string; email: string; nombre: string; negocio: string; activa: boolean };
+type Profile = { id: string; email: string; nombre: string; activa: boolean; subscription_status: string; subscription_end_date: string | null; auth_status: string | null };
 type Suscripcion = { id: string | null; estado: string; plan: { nombre: string } | null; proximo_cobro: string | null };
 type Pago = { id: string; monto_clp: number | null; estado: string; periodo_cobrado: string; es_legacy?: boolean };
 type CuentaData = { tiene_suscripcion: boolean; profile: Profile; suscripcion: Suscripcion; pagos_pendientes: Pago[] };
@@ -14,6 +17,76 @@ function formatCLP(n: number) {
 function formatFecha(s: string | null) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+async function consultarCuenta(email: string): Promise<CuentaData> {
+  const emailLower = email.trim().toLowerCase();
+
+  // 1. Buscar perfil por email
+  const { data: profiles, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, email, nombre_completo, nombre_negocio, subscription_status, subscription_end_date, auth_status, suscripcion_activa")
+    .eq("email", emailLower)
+    .limit(1);
+
+  if (profErr) throw new Error(profErr.message);
+  if (!profiles || profiles.length === 0) throw Object.assign(new Error("No se encontró ninguna cuenta con ese email"), { status: 404 });
+
+  const p = profiles[0];
+  const profile: Profile = {
+    id: p.id,
+    email: p.email,
+    nombre: p.nombre_completo || p.nombre_negocio || p.email,
+    activa: p.suscripcion_activa ?? (p.subscription_status === "active"),
+    subscription_status: p.subscription_status,
+    subscription_end_date: p.subscription_end_date,
+    auth_status: p.auth_status,
+  };
+
+  // 2. Buscar suscripción activa en tabla nueva
+  const { data: subs } = await supabase
+    .from("suscripciones")
+    .select("id, estado, proximo_cobro, plan:planes(id, nombre, uf_cantidad)")
+    .eq("user_id", profile.id)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (subs && subs.length > 0) {
+    const sub = subs[0];
+    const { data: pagos } = await supabase
+      .from("pagos")
+      .select("id, monto_clp, estado, periodo_cobrado")
+      .eq("suscripcion_id", sub.id)
+      .in("estado", ["pendiente", "en_gracia"])
+      .order("created_at", { ascending: false });
+
+    return {
+      tiene_suscripcion: true,
+      profile,
+      suscripcion: { id: sub.id, estado: sub.estado, plan: sub.plan as any, proximo_cobro: sub.proximo_cobro },
+      pagos_pendientes: pagos || [],
+    };
+  }
+
+  // 3. Sistema legacy
+  const suspendida =
+    profile.subscription_status === "suspended" ||
+    profile.auth_status === "suspended" ||
+    (profile.subscription_end_date && new Date(profile.subscription_end_date) < new Date());
+
+  return {
+    tiene_suscripcion: true,
+    profile,
+    suscripcion: {
+      id: null,
+      estado: suspendida ? "bloqueada" : "activa",
+      plan: { nombre: "POS-Matic" },
+      proximo_cobro: profile.subscription_end_date,
+    },
+    pagos_pendientes: suspendida
+      ? [{ id: "legacy-" + profile.id, monto_clp: null, estado: "pendiente", periodo_cobrado: new Date().toISOString().slice(0, 7), es_legacy: true }]
+      : [],
+  };
 }
 
 export default function Pagar() {
@@ -28,12 +101,12 @@ export default function Pagar() {
   const [buscando, setBuscando] = useState(false);
   const [cuenta, setCuenta] = useState<CuentaData | null>(null);
   const [noSubEmail, setNoSubEmail] = useState("");
-  const [montoLegacy, setMontoLegacy] = useState<string>("Calculando...");
+  const [montoLegacy, setMontoLegacy] = useState("Calculando...");
   const [pagandoLegacy, setPagandoLegacy] = useState(false);
   const [cuentaError, setCuentaError] = useState("");
   const perfilIdRef = useRef<string | null>(null);
 
-  // Cargar hCaptcha script
+  // Cargar hCaptcha
   useEffect(() => {
     if (document.querySelector('script[src*="hcaptcha"]')) return;
     const script = document.createElement("script");
@@ -43,16 +116,15 @@ export default function Pagar() {
     document.head.appendChild(script);
   }, []);
 
-  // Fetch monto UF cuando se muestra el pago legacy
+  // Fetch monto UF para pago legacy
   useEffect(() => {
     if (view !== "cuenta" || !cuenta) return;
     const legacy = cuenta.pagos_pendientes.find((p) => p.es_legacy);
     if (!legacy) return;
     perfilIdRef.current = cuenta.profile.id;
-    fetch(`${API}/api/uf-preview?uf=0.7`)
-      .then((r) => r.json())
-      .then((d) => { if (d.monto) setMontoLegacy(formatCLP(d.monto) + " aprox."); })
-      .catch(() => {});
+    supabase.rpc("get_uf_actual").then(({ data }) => {
+      if (data) setMontoLegacy(formatCLP(Math.round(0.7 * data)) + " aprox.");
+    });
   }, [view, cuenta]);
 
   async function handleLookup(e: React.FormEvent) {
@@ -60,24 +132,9 @@ export default function Pagar() {
     setLookupError("");
     if (!email) { setLookupError("Ingresa tu email."); return; }
 
-    let htoken = "";
-    if ((window as any).hcaptcha) {
-      try { htoken = (window as any).hcaptcha.getResponse(); } catch {}
-    }
-
     setBuscando(true);
     try {
-      const res = await fetch(`${API}/api/cuenta/estado`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), hcaptcha_token: htoken }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setLookupError(data.error || "Error al consultar la cuenta.");
-        if ((window as any).hcaptcha) (window as any).hcaptcha.reset();
-        return;
-      }
+      const data = await consultarCuenta(email);
       if (!data.tiene_suscripcion) {
         setNoSubEmail(email);
         setView("nosub");
@@ -85,8 +142,8 @@ export default function Pagar() {
       }
       setCuenta(data);
       setView("cuenta");
-    } catch {
-      setLookupError("No se pudo conectar con el servidor.");
+    } catch (err: any) {
+      setLookupError(err.message || "Error al consultar la cuenta.");
       if ((window as any).hcaptcha) (window as any).hcaptcha.reset();
     } finally {
       setBuscando(false);
@@ -97,9 +154,13 @@ export default function Pagar() {
     setCuentaError("");
     setPagandoLegacy(true);
     try {
-      const res = await fetch(`${API}/api/pago-legacy`, {
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/pago-legacy`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        },
         body: JSON.stringify({ user_id: perfilIdRef.current, plan_slug: "basico" }),
       });
       const data = await res.json();
@@ -114,9 +175,13 @@ export default function Pagar() {
   async function pagarAhora(pagoId: string) {
     setCuentaError("");
     try {
-      const res = await fetch(`${API}/api/crear-preferencia`, {
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/crear-preferencia`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        },
         body: JSON.stringify({ pago_id: pagoId }),
       });
       const data = await res.json();
@@ -156,7 +221,6 @@ export default function Pagar() {
     <div className="min-h-screen flex flex-col items-center justify-start py-12 px-4"
       style={{ fontFamily: "'Manrope', sans-serif", backgroundColor: "#ffffff", backgroundImage: "radial-gradient(#a413ec 0.5px, transparent 0.5px)", backgroundSize: "24px 24px", backgroundAttachment: "fixed" }}>
 
-      {/* Header */}
       <div className="mb-8 text-center">
         <div className="inline-flex items-center gap-3 mb-2">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg font-black"
@@ -205,7 +269,6 @@ export default function Pagar() {
       {/* Estado cuenta */}
       {view === "cuenta" && cuenta && (
         <div className="pagar-card w-full max-w-md p-8">
-          {/* Perfil */}
           <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-100">
             <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-white text-xl"
               style={{ background: "linear-gradient(135deg,#a413ec,#7100a6)" }}>
@@ -222,7 +285,6 @@ export default function Pagar() {
             </div>
           </div>
 
-          {/* Plan */}
           <div className="bg-gray-50 rounded-xl p-4 mb-6">
             <div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1">Plan activo</div>
             <div className="font-bold text-gray-900">{cuenta.suscripcion.plan?.nombre || "—"}</div>
@@ -231,7 +293,6 @@ export default function Pagar() {
             )}
           </div>
 
-          {/* Pagos pendientes */}
           {cuenta.pagos_pendientes.length > 0 ? (
             <div>
               <h3 className="font-bold text-gray-800 mb-3">Pagos pendientes</h3>
@@ -283,8 +344,7 @@ export default function Pagar() {
           <div className="text-5xl mb-4">🔍</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">No se encontró suscripción</h2>
           <p className="text-gray-500 text-sm mb-6">
-            El email <strong>{noSubEmail}</strong> no tiene una suscripción activa.<br />
-            ¿Quieres contratar un plan?
+            El email <strong>{noSubEmail}</strong> no tiene una suscripción activa.
           </p>
           <a href="/#planes" className="btn-primary inline-flex justify-center mb-3">Ver planes</a>
           <br />
